@@ -256,10 +256,23 @@ class FlutterVersion {
     } on VersionCheckError {
       return;
     }
-    final DateTime? latestFlutterCommitDate = await _getLatestAvailableFlutterDate();
+
+    // Don't ping the server too often. Return cached value if it's fresh.
+    DateTime? latestFlutterCommitDate = await _getLatestAvailableFlutterDateFromStamp();
+    FlutterVersion? newVersion;
+    if (latestFlutterCommitDate == null) {
+      // Cache is empty or it's been a while since the last server ping. Ping the server.
+      latestFlutterCommitDate = await _getLatestAvailableFlutterDateFromServer();
+      if (latestFlutterCommitDate != null) {
+        // If the check from server was successful, construct a [FlutterVersion]
+        // representing the newer version.
+        newVersion = FlutterVersion(frameworkRevision: kGitTrackingUpstream);
+      }
+    }
 
     return VersionFreshnessValidator(
       version: this,
+      updateVersion: newVersion,
       clock: _clock,
       localFrameworkCommitDate: localFrameworkCommitDate,
       latestFlutterCommitDate: latestFlutterCommitDate,
@@ -273,7 +286,7 @@ class FlutterVersion {
   ///
   /// Throws [VersionCheckError] if a git command fails, for example, when the
   /// remote git repository is not reachable due to a network issue.
-  static Future<String> fetchRemoteFrameworkCommitDate(String branch) async {
+  static Future<String> fetchRemoteFrameworkCommitDate() async {
     try {
       // Fetch upstream branch's commit and tags
       await _run(<String>['git', 'fetch', '--tags']);
@@ -334,14 +347,12 @@ class FlutterVersion {
     return <String>['git', '-c', 'log.showSignature=false', 'log'] + args;
   }
 
-  /// Gets the release date of the latest available Flutter version.
+  /// Gets the release date of the latest available Flutter version, stored in
+  /// cache.
   ///
-  /// This method sends a server request if it's been more than
-  /// [checkAgeConsideredUpToDate] since the last version check.
-  ///
-  /// Returns null if the cached version is out-of-date or missing, and we are
-  /// unable to reach the server to get the latest version.
-  Future<DateTime?> _getLatestAvailableFlutterDate() async {
+  /// Returns null if it's been more than [checkAgeConsideredUpToDate] since the
+  /// last server check or cached version is missing.
+  Future<DateTime?> _getLatestAvailableFlutterDateFromStamp() async {
     globals.cache.checkLockAcquired();
     final VersionCheckStamp versionCheckStamp = await VersionCheckStamp.load(globals.cache, globals.logger);
 
@@ -351,16 +362,24 @@ class FlutterVersion {
         versionCheckStamp.lastTimeVersionWasChecked!,
       );
 
-      // Don't ping the server too often. Return cached value if it's fresh.
       if (timeSinceLastCheck < VersionFreshnessValidator.checkAgeConsideredUpToDate) {
         return versionCheckStamp.lastKnownRemoteVersion;
       }
     }
+    return null;
+  }
 
-    // Cache is empty or it's been a while since the last server ping. Ping the server.
+  /// Gets the release date of the latest available Flutter version, from
+  /// upstream server.
+  ///
+  /// Returns null if we are unable to reach the server.
+  Future<DateTime?> _getLatestAvailableFlutterDateFromServer() async {
+    globals.cache.checkLockAcquired();
+    final VersionCheckStamp versionCheckStamp = await VersionCheckStamp.load(globals.cache, globals.logger);
+    final DateTime now = _clock.now();
     try {
       final DateTime remoteFrameworkCommitDate = DateTime.parse(
-        await FlutterVersion.fetchRemoteFrameworkCommitDate(channel),
+        await FlutterVersion.fetchRemoteFrameworkCommitDate(),
       );
       await versionCheckStamp.store(
         newTimeVersionWasChecked: now,
@@ -858,9 +877,11 @@ class VersionFreshnessValidator {
     required this.logger,
     this.latestFlutterCommitDate,
     this.pauseTime = Duration.zero,
+    this.updateVersion,
   });
 
   final FlutterVersion version;
+  final FlutterVersion? updateVersion;
   final DateTime localFrameworkCommitDate;
   final SystemClock clock;
   final Cache cache;
@@ -926,11 +947,6 @@ class VersionFreshnessValidator {
 
   /// Execute validations and print warning to [logger] if necessary.
   Future<void> run() async {
-    // Don't perform update checks if we're not on an official channel.
-    if (!kOfficialChannels.contains(version.channel)) {
-      return;
-    }
-
     // Get whether there's a newer version on the remote. This only goes
     // to the server if we haven't checked recently so won't happen on every
     // command.
@@ -964,7 +980,7 @@ class VersionFreshnessValidator {
     final String updateMessage;
     switch (remoteVersionStatus) {
       case VersionCheckResult.newVersionAvailable:
-        updateMessage = _newVersionAvailableMessage;
+        updateMessage = _newVersionAvailableMessage(version, updateVersion);
         break;
       case VersionCheckResult.versionIsCurrent:
       case VersionCheckResult.unknown:
@@ -991,7 +1007,20 @@ WARNING: your installation of Flutter is ${frameworkAge.inDays} days old.
 To update to the latest version, run "flutter upgrade".''';
 }
 
-const String _newVersionAvailableMessage = '''
-A new version of Flutter is available!
+String _newVersionAvailableMessage(FlutterVersion installedVersion, FlutterVersion? updateVersion) {
+  String compareVersionMessage;
+  if (updateVersion != null) {
+    compareVersionMessage = '''
+The latest version: ${updateVersion.frameworkVersion} (revision ${updateVersion.frameworkRevisionShort})
+Your current version: ${installedVersion.frameworkVersion} (revision ${updateVersion.frameworkRevisionShort})
 
+''';
+  } else {
+    compareVersionMessage = 'To compare versions, run "flutter upgrade --verify-only".';
+  }
+  return '''
+A new version of Flutter is available on channel ${installedVersion.channel}!
+
+$compareVersionMessage
 To update to the latest version, run "flutter upgrade".''';
+}
