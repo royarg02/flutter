@@ -257,28 +257,24 @@ class FlutterVersion {
       return;
     }
 
+    bool didPingServer = false;
     // Don't ping the server too often. Return cached value if it's fresh.
     DateTime? latestFlutterCommitDate = await _getLatestAvailableFlutterDateFromStamp();
-    FlutterVersion? newVersion;
     if (latestFlutterCommitDate == null) {
       // Cache is empty or it's been a while since the last server ping. Ping the server.
       latestFlutterCommitDate = await _getLatestAvailableFlutterDateFromServer();
-      if (latestFlutterCommitDate != null) {
-        // If the check from server was successful, construct a [FlutterVersion]
-        // representing the newer version.
-        newVersion = FlutterVersion(frameworkRevision: kGitTrackingUpstream);
-      }
+      didPingServer = true;
     }
 
     return VersionFreshnessValidator(
       version: this,
-      updateVersion: newVersion,
       clock: _clock,
       localFrameworkCommitDate: localFrameworkCommitDate,
       latestFlutterCommitDate: latestFlutterCommitDate,
       logger: globals.logger,
       cache: globals.cache,
       pauseTime: VersionFreshnessValidator.timeToPauseToLetUserReadTheMessage,
+      didPingServer: didPingServer,
     ).run();
   }
 
@@ -875,19 +871,19 @@ class VersionFreshnessValidator {
     required this.clock,
     required this.cache,
     required this.logger,
+    required this.didPingServer,
     this.latestFlutterCommitDate,
     this.pauseTime = Duration.zero,
-    this.updateVersion,
   });
 
   final FlutterVersion version;
-  final FlutterVersion? updateVersion;
   final DateTime localFrameworkCommitDate;
   final SystemClock clock;
   final Cache cache;
   final Logger logger;
   final Duration pauseTime;
   final DateTime? latestFlutterCommitDate;
+  final bool didPingServer;
 
   late final DateTime now = clock.now();
   late final Duration frameworkAge = now.difference(localFrameworkCommitDate);
@@ -965,7 +961,13 @@ class VersionFreshnessValidator {
     // Do not load the stamp before the above server check as it may modify the stamp file.
     final VersionCheckStamp stamp = await VersionCheckStamp.load(cache, logger);
     final DateTime lastTimeWarningWasPrinted = stamp.lastTimeWarningWasPrinted ?? clock.ago(maxTimeSinceLastWarning * 2);
+    final DateTime? lastTimeVersionWasChecked = stamp.lastTimeVersionWasChecked;
     final bool beenAWhileSinceWarningWasPrinted = now.difference(lastTimeWarningWasPrinted) > maxTimeSinceLastWarning;
+    if (remoteVersionStatus == VersionCheckResult.newVersionAvailable && lastTimeVersionWasChecked != null) {
+      if (now.difference(lastTimeVersionWasChecked) > VersionFreshnessValidator.checkAgeConsideredUpToDate) {
+
+      }
+    }
     if (!beenAWhileSinceWarningWasPrinted) {
       return;
     }

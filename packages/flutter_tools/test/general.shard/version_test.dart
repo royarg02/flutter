@@ -89,6 +89,12 @@ void main() {
             stdout: getChannelOutOfDateVersion().toString(),
           ),
           const FakeCommand(
+            command: <String>['git', 'tag', '--points-at', '@{upstream}'],
+          ),
+          const FakeCommand(
+            command: <String>['git', 'describe', '--match', '*.*.*', '--long', '--tags', '@{upstream}'],
+          ),
+          const FakeCommand(
             command: <String>['git', '-c', 'log.showSignature=false', 'log', '-n', '1', '--pretty=format:%ar'],
             stdout: '1 second ago',
           ),
@@ -271,6 +277,36 @@ void main() {
 
         final Duration frameworkAge = _testClock.now().difference(getChannelOutOfDateVersion());
         expect(logger.statusText, contains('WARNING: your installation of Flutter is ${frameworkAge.inDays} days old.'));
+      });
+
+      testWithoutContext('freshness message includes version when server is pinged', () async {
+        final FakeFlutterVersion flutterVersion = FakeFlutterVersion(channel: channel);
+        final FakeFlutterVersion updateVersion = FakeFlutterVersion(channel: channel);
+        final BufferLogger logger = BufferLogger.test();
+        final VersionCheckStamp stamp = VersionCheckStamp(
+          lastTimeVersionWasChecked: _stampOutOfDate,
+          lastKnownRemoteVersion: _testClock.ago(const Duration(days: 2)),
+        );
+        cache.versionStamp = json.encode(stamp);
+
+        await VersionFreshnessValidator(
+          version: flutterVersion,
+          updateVersion: updateVersion,
+          cache: cache,
+          clock: _testClock,
+          logger: logger,
+          localFrameworkCommitDate: getChannelOutOfDateVersion(),
+          latestFlutterCommitDate: getChannelUpToDateVersion(),
+        ).run();
+
+        expect(
+          logger.statusText,
+          containsAll(<String>[
+            'A new version of Flutter is available on channel $channel!',
+            'The latest version: 1.0.0 (revision abc123)',
+            'The current version: 4.5.6 (revision def456)',
+          ])
+        );
       });
 
       group('$VersionCheckStamp for $channel', () {
