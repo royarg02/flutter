@@ -202,39 +202,6 @@ class FlutterVersion {
   /// If a git command fails, this will return a placeholder date.
   String get frameworkCommitDate => _gitCommitDate(lenient: true);
 
-  // The date of the given commit hash as [gitRef]. If no hash is specified,
-  // then it is the HEAD of the current local branch.
-  //
-  // If lenient is true, and the git command fails, a placeholder date is
-  // returned. Otherwise, the VersionCheckError exception is propagated.
-  static String _gitCommitDate({
-    String gitRef = 'HEAD',
-    bool lenient = false,
-  }) {
-    final List<String> args = gitLog(<String>[
-      gitRef,
-      '-n',
-      '1',
-      '--pretty=format:%ad',
-      '--date=iso',
-    ]);
-    try {
-      // Don't plumb 'lenient' through directly so that we can print an error
-      // if something goes wrong.
-      return _runSync(args, lenient: false);
-    } on VersionCheckError catch (e) {
-      if (lenient) {
-        final DateTime dummyDate = DateTime.fromMillisecondsSinceEpoch(0);
-        globals.printError('Failed to find the latest git commit date: $e\n'
-          'Returning $dummyDate instead.');
-        // Return something that DateTime.parse() can parse.
-        return dummyDate.toString();
-      } else {
-        rethrow;
-      }
-    }
-  }
-
   /// Checks if the currently installed version of Flutter is up-to-date, and
   /// warns the user if it isn't.
   ///
@@ -249,39 +216,13 @@ class FlutterVersion {
     if (VersionUpstreamValidator(version: this, platform: globals.platform).run() != null) {
       return;
     }
-    DateTime localFrameworkCommitDate;
-    try {
-      // Don't perform the update check if fetching the latest local commit failed.
-      localFrameworkCommitDate = DateTime.parse(_gitCommitDate());
-    } on VersionCheckError {
-      return;
-    }
-    final DateTime? latestFlutterCommitDate = await _getLatestAvailableFlutterDate();
-
     return VersionFreshnessValidator(
       version: this,
       clock: _clock,
-      localFrameworkCommitDate: localFrameworkCommitDate,
-      latestFlutterCommitDate: latestFlutterCommitDate,
       logger: globals.logger,
       cache: globals.cache,
       pauseTime: VersionFreshnessValidator.timeToPauseToLetUserReadTheMessage,
     ).run();
-  }
-
-  /// The date of the latest framework commit in the remote repository.
-  ///
-  /// Throws [VersionCheckError] if a git command fails, for example, when the
-  /// remote git repository is not reachable due to a network issue.
-  static Future<String> fetchRemoteFrameworkCommitDate() async {
-    try {
-      // Fetch upstream branch's commit and tags
-      await _run(<String>['git', 'fetch', '--tags']);
-      return _gitCommitDate(gitRef: kGitTrackingUpstream);
-    } on VersionCheckError catch (error) {
-      globals.printError(error.message);
-      rethrow;
-    }
   }
 
   /// Return a short string for the version (e.g. `master/0.0.59-pre.92`, `scroll_refactor/a76bc8e22b`).
@@ -325,59 +266,45 @@ class FlutterVersion {
       // Ignore, since we don't mind if the file didn't exist in the first place.
     }
   }
+}
 
-  /// log.showSignature=false is a user setting and it will break things,
-  /// so we want to disable it for every git log call.  This is a convenience
-  /// wrapper that does that.
-  @visibleForTesting
-  static List<String> gitLog(List<String> args) {
-    return <String>['git', '-c', 'log.showSignature=false', 'log'] + args;
-  }
+/// log.showSignature=false is a user setting and it will break things,
+/// so we want to disable it for every git log call.  This is a convenience
+/// wrapper that does that.
+@visibleForTesting
+List<String> gitLog(List<String> args) {
+  return <String>['git', '-c', 'log.showSignature=false', 'log'] + args;
+}
 
-  /// Gets the release date of the latest available Flutter version.
-  ///
-  /// This method sends a server request if it's been more than
-  /// [checkAgeConsideredUpToDate] since the last version check.
-  ///
-  /// Returns null if the cached version is out-of-date or missing, and we are
-  /// unable to reach the server to get the latest version.
-  Future<DateTime?> _getLatestAvailableFlutterDate() async {
-    globals.cache.checkLockAcquired();
-    final VersionCheckStamp versionCheckStamp = await VersionCheckStamp.load(globals.cache, globals.logger);
-
-    final DateTime now = _clock.now();
-    if (versionCheckStamp.lastTimeVersionWasChecked != null) {
-      final Duration timeSinceLastCheck = now.difference(
-        versionCheckStamp.lastTimeVersionWasChecked!,
-      );
-
-      // Don't ping the server too often. Return cached value if it's fresh.
-      if (timeSinceLastCheck < VersionFreshnessValidator.checkAgeConsideredUpToDate) {
-        return versionCheckStamp.lastKnownRemoteVersion;
-      }
-    }
-
-    // Cache is empty or it's been a while since the last server ping. Ping the server.
-    try {
-      final DateTime remoteFrameworkCommitDate = DateTime.parse(
-        await FlutterVersion.fetchRemoteFrameworkCommitDate(),
-      );
-      await versionCheckStamp.store(
-        newTimeVersionWasChecked: now,
-        newKnownRemoteVersion: remoteFrameworkCommitDate,
-      );
-      return remoteFrameworkCommitDate;
-    } on VersionCheckError catch (error) {
-      // This happens when any of the git commands fails, which can happen when
-      // there's no Internet connectivity. Remote version check is best effort
-      // only. We do not prevent the command from running when it fails.
-      globals.printTrace('Failed to check Flutter version in the remote repository: $error');
-      // Still update the timestamp to avoid us hitting the server on every single
-      // command if for some reason we cannot connect (eg. we may be offline).
-      await versionCheckStamp.store(
-        newTimeVersionWasChecked: now,
-      );
-      return null;
+// The date of the given commit hash as [gitRef]. If no hash is specified,
+// then it is the HEAD of the current local branch.
+//
+// If lenient is true, and the git command fails, a placeholder date is
+// returned. Otherwise, the VersionCheckError exception is propagated.
+String _gitCommitDate({
+  String gitRef = 'HEAD',
+  bool lenient = false,
+}) {
+  final List<String> args = gitLog(<String>[
+    gitRef,
+    '-n',
+    '1',
+    '--pretty=format:%ad',
+    '--date=iso',
+  ]);
+  try {
+    // Don't plumb 'lenient' through directly so that we can print an error
+    // if something goes wrong.
+    return _runSync(args, lenient: false);
+  } on VersionCheckError catch (e) {
+    if (lenient) {
+      final DateTime dummyDate = DateTime.fromMillisecondsSinceEpoch(0);
+      globals.printError('Failed to find the latest git commit date: $e\n'
+        'Returning $dummyDate instead.');
+      // Return something that DateTime.parse() can parse.
+      return dummyDate.toString();
+    } else {
+      rethrow;
     }
   }
 }
@@ -852,24 +779,20 @@ enum VersionCheckResult {
 class VersionFreshnessValidator {
   VersionFreshnessValidator({
     required this.version,
-    required this.localFrameworkCommitDate,
     required this.clock,
     required this.cache,
     required this.logger,
-    this.latestFlutterCommitDate,
     this.pauseTime = Duration.zero,
   });
 
   final FlutterVersion version;
-  final DateTime localFrameworkCommitDate;
   final SystemClock clock;
   final Cache cache;
   final Logger logger;
   final Duration pauseTime;
-  final DateTime? latestFlutterCommitDate;
 
   late final DateTime now = clock.now();
-  late final Duration frameworkAge = now.difference(localFrameworkCommitDate);
+  late final FlutterVersion? updateVersion;
 
   /// The amount of time we wait before pinging the server to check for the
   /// availability of a newer version of Flutter.
@@ -888,20 +811,6 @@ class VersionFreshnessValidator {
   /// This can be customized in tests to speed them up.
   @visibleForTesting
   static Duration timeToPauseToLetUserReadTheMessage = const Duration(seconds: 2);
-
-  // We show a warning if either we know there is a new remote version, or we
-  // couldn't tell but the local version is outdated.
-  @visibleForTesting
-  bool canShowWarning(VersionCheckResult remoteVersionStatus) {
-    final bool installationSeemsOutdated = frameworkAge > versionAgeConsideredUpToDate(version.channel);
-    if (remoteVersionStatus == VersionCheckResult.newVersionAvailable) {
-      return true;
-    }
-    if (!installationSeemsOutdated) {
-      return false;
-    }
-    return remoteVersionStatus == VersionCheckResult.unknown;
-  }
 
   /// We warn the user if the age of their Flutter installation is greater than
   /// this duration. The durations are slightly longer than the expected release
@@ -924,24 +833,103 @@ class VersionFreshnessValidator {
     }
   }
 
+  /// Gets the release date of the latest available Flutter version.
+  ///
+  /// This method sends a server request if it's been more than
+  /// [checkAgeConsideredUpToDate] since the last version check.
+  ///
+  /// Returns null if the cached version is out-of-date or missing, and we are
+  /// unable to reach the server to get the latest version.
+  Future<DateTime?> _getLatestAvailableFlutterCommitDate() async {
+    cache.checkLockAcquired();
+    final VersionCheckStamp stamp = await VersionCheckStamp.load(cache, logger);
+    if (stamp.lastTimeVersionWasChecked != null) {
+      final Duration timeSinceLastCheck = now.difference(
+        stamp.lastTimeVersionWasChecked!,
+      );
+
+      // Don't ping the server too often. Return cached value if it's fresh.
+      if (timeSinceLastCheck < VersionFreshnessValidator.checkAgeConsideredUpToDate) {
+        return stamp.lastKnownRemoteVersion;
+      }
+    }
+    // At this point, the cache must be empty, or it has been a while since the
+    // last server ping. Ping the server.
+    try {
+      final DateTime remoteFrameworkCommitDate = DateTime.parse(
+        await fetchRemoteFrameworkCommitDate(),
+      );
+      await stamp.store(
+        newTimeVersionWasChecked: now,
+        newKnownRemoteVersion: remoteFrameworkCommitDate,
+      );
+      // If the ping was successful construct a [FlutterVersion] representing
+      // the remote version.
+      updateVersion = FlutterVersion(frameworkRevision: kGitTrackingUpstream);
+      return remoteFrameworkCommitDate;
+    } on VersionCheckError catch (error) {
+      // This happens when any of the git commands fails, which can happen when
+      // there's no Internet connectivity. Remote version check is best effort
+      // only. We do not prevent the command from running when it fails.
+      globals.printTrace('Failed to check Flutter version in the remote repository: $error');
+      // Still update the timestamp to avoid us hitting the server on every single
+      // command if for some reason we cannot connect (eg. we may be offline).
+      await stamp.store(
+        newTimeVersionWasChecked: now,
+      );
+      return null;
+    }
+  }
+
+  /// Determines whether there is a newer version on the remote based on the
+  /// given local and remote framework commit dates.
+  VersionCheckResult determineVersionCheckResult({
+    required DateTime localFrameworkCommitDate,
+    DateTime? remoteFrameworkCommitDate,
+  }) {
+    if (remoteFrameworkCommitDate == null) {
+      return VersionCheckResult.unknown;
+    }
+    if (remoteFrameworkCommitDate.isAfter(localFrameworkCommitDate)) {
+      return VersionCheckResult.newVersionAvailable;
+    }
+    return VersionCheckResult.versionIsCurrent;
+  }
+
+  /// The date of the latest framework commit in the remote repository.
+  ///
+  /// Throws [VersionCheckError] if a git command fails, for example, when the
+  /// remote git repository is not reachable due to a network issue.
+  Future<String> fetchRemoteFrameworkCommitDate() async {
+    try {
+      // Fetch upstream branch's commit and tags
+      await _run(<String>['git', 'fetch', '--tags']);
+      return _gitCommitDate(gitRef: kGitTrackingUpstream);
+    } on VersionCheckError catch (error) {
+      globals.printError(error.message);
+      rethrow;
+    }
+  }
+
   /// Execute validations and print warning to [logger] if necessary.
   Future<void> run() async {
+    final DateTime localFrameworkCommitDate;
+    try {
+      localFrameworkCommitDate = DateTime.parse(_gitCommitDate());
+    } on VersionCheckError {
+      // The tool failed to parse the local commit date. Bail from the freshness
+      // check to prevent crash.
+      return;
+    }
+
     // Get whether there's a newer version on the remote. This only goes
     // to the server if we haven't checked recently so won't happen on every
     // command.
-    final VersionCheckResult remoteVersionStatus;
+    final DateTime? remoteFrameworkCommitDate = await _getLatestAvailableFlutterCommitDate();
 
-    if (latestFlutterCommitDate == null) {
-      remoteVersionStatus = VersionCheckResult.unknown;
-    } else {
-      if (latestFlutterCommitDate!.isAfter(localFrameworkCommitDate)) {
-        remoteVersionStatus = VersionCheckResult.newVersionAvailable;
-      } else {
-        remoteVersionStatus = VersionCheckResult.versionIsCurrent;
-      }
-    }
 
-    // Do not load the stamp before the above server check as it may modify the stamp file.
+    // Do not load the stamp before the above server check as it may modify the
+    // stamp file.
     final VersionCheckStamp stamp = await VersionCheckStamp.load(cache, logger);
     final DateTime lastTimeWarningWasPrinted = stamp.lastTimeWarningWasPrinted ?? clock.ago(maxTimeSinceLastWarning * 2);
     final bool beenAWhileSinceWarningWasPrinted = now.difference(lastTimeWarningWasPrinted) > maxTimeSinceLastWarning;
@@ -949,25 +937,32 @@ class VersionFreshnessValidator {
       return;
     }
 
-    final bool canShowWarningResult = canShowWarning(remoteVersionStatus);
+    final VersionCheckResult remoteVersionStatus = determineVersionCheckResult(
+      localFrameworkCommitDate: localFrameworkCommitDate,
+      remoteFrameworkCommitDate: remoteFrameworkCommitDate,
+    );
 
-    if (!canShowWarningResult) {
-      return;
-    }
-
-    // By this point, we should show the update message
+    // We show a warning if either we know there is a new remote version, or we
+    // couldn't tell but the local version is outdated.
     final String updateMessage;
-    switch (remoteVersionStatus) {
+    switch(remoteVersionStatus) {
+      case VersionCheckResult.versionIsCurrent:
+        return;
       case VersionCheckResult.newVersionAvailable:
         updateMessage = _newVersionAvailableMessage;
         break;
-      case VersionCheckResult.versionIsCurrent:
       case VersionCheckResult.unknown:
+        final Duration frameworkAge = now.difference(localFrameworkCommitDate);
+        final bool installationSeemsOutdated = frameworkAge > versionAgeConsideredUpToDate(version.channel);
+        if (!installationSeemsOutdated) {
+          return;
+        }
         updateMessage = versionOutOfDateMessage(frameworkAge);
         break;
     }
 
     logger.printBox(updateMessage);
+    // Update the time when we displayed the message to the stamp.
     await Future.wait<void>(<Future<void>>[
       stamp.store(
         newTimeWarningWasPrinted: now,
