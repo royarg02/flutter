@@ -137,7 +137,7 @@ void main() {
         );
         cache.versionStamp = json.encode(stamp);
 
-        await VersionFreshnessValidator(
+        await FakeVersionFreshnessValidator(
           version: flutterVersion,
           cache: cache,
           clock: _testClock,
@@ -158,7 +158,7 @@ void main() {
         );
         cache.versionStamp = json.encode(stamp);
 
-        await VersionFreshnessValidator(
+        await FakeVersionFreshnessValidator(
           version: flutterVersion,
           cache: cache,
           clock: _testClock,
@@ -181,7 +181,7 @@ void main() {
         );
         cache.versionStamp = json.encode(stamp);
 
-        await VersionFreshnessValidator(
+        await FakeVersionFreshnessValidator(
           version: flutterVersion,
           cache: cache,
           clock: _testClock,
@@ -198,7 +198,7 @@ void main() {
         final BufferLogger logger = BufferLogger.test();
         cache.versionStamp = '{}';
 
-        await VersionFreshnessValidator(
+        await FakeVersionFreshnessValidator(
           version: flutterVersion,
           cache: cache,
           clock: _testClock,
@@ -220,7 +220,7 @@ void main() {
         );
         cache.versionStamp = json.encode(stamp);
 
-        await VersionFreshnessValidator(
+        await FakeVersionFreshnessValidator(
           version: flutterVersion,
           cache: cache,
           clock: _testClock,
@@ -237,7 +237,7 @@ void main() {
         final BufferLogger logger = BufferLogger.test();
         cache.versionStamp = '{}';
 
-        await VersionFreshnessValidator(
+        await FakeVersionFreshnessValidator(
           version: flutterVersion,
           cache: cache,
           clock: _testClock,
@@ -258,7 +258,7 @@ void main() {
         );
         cache.versionStamp = json.encode(stamp);
 
-        await VersionFreshnessValidator(
+        await FakeVersionFreshnessValidator(
           version: flutterVersion,
           cache: cache,
           clock: _testClock,
@@ -710,4 +710,35 @@ class FakeFlutterVersion extends Fake implements FlutterVersion {
 
   @override
   final String? repositoryUrl;
+}
+
+class FakeVersionFreshnessValidator extends Fake implements VersionFreshnessValidator {
+  FakeVersionFreshnessValidator({
+    this.version,
+    this.clock,
+    this.cache,
+    this.logger,
+    this.localFrameworkCommitDate,
+    this.latestFlutterCommitDate,
+  });
+
+  @override
+  final FlutterVersion version;
+  @override
+  final SystemClock clock;
+  @override
+  final Cache cache;
+  @override
+  final Logger logger;
+
+  final DateTime localFrameworkCommitDate;
+  final DateTime latestFlutterCommitDate;
+
+  bool didPingServer = false;
+
+  @override
+  Future<String> fetchRemoteFrameworkCommitDate() {
+    didPingServer = true;
+    return latestFlutterCommitDate.to
+  }
 }
