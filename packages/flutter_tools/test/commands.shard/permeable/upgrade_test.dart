@@ -49,9 +49,6 @@ void main() {
 
     testUsingContext('throws on unknown tag, official branch,  noforce', () async {
       final FakeFlutterVersion flutterVersion = FakeFlutterVersion(channel: 'beta');
-      const String upstreamRevision = '';
-      final FakeFlutterVersion latestVersion = FakeFlutterVersion(frameworkRevision: upstreamRevision);
-      fakeCommandRunner.remoteVersion = latestVersion;
 
       final Future<FlutterCommandResult> result = fakeCommandRunner.runCommand(
         force: false,
@@ -69,9 +66,6 @@ void main() {
 
     testUsingContext('throws tool exit with uncommitted changes', () async {
       final FakeFlutterVersion flutterVersion = FakeFlutterVersion(channel: 'beta');
-      const String upstreamRevision = '';
-      final FakeFlutterVersion latestVersion = FakeFlutterVersion(frameworkRevision: upstreamRevision);
-      fakeCommandRunner.remoteVersion = latestVersion;
       fakeCommandRunner.willHaveUncommittedChanges = true;
 
       final Future<FlutterCommandResult> result = fakeCommandRunner.runCommand(
@@ -90,10 +84,9 @@ void main() {
 
     testUsingContext("Doesn't continue on known tag, beta branch, no force, already up-to-date", () async {
       const String revision = 'abc123';
-      final FakeFlutterVersion latestVersion = FakeFlutterVersion(frameworkRevision: revision);
       final FakeFlutterVersion flutterVersion = FakeFlutterVersion(channel: 'beta', frameworkRevision: revision);
       fakeCommandRunner.alreadyUpToDate = true;
-      fakeCommandRunner.remoteVersion = latestVersion;
+      fakeCommandRunner.remoteRevision = revision;
 
       final Future<FlutterCommandResult> result = fakeCommandRunner.runCommand(
         force: false,
@@ -151,9 +144,8 @@ void main() {
       Platform: () => fakePlatform,
     });
 
-    testUsingContext('fetchLatestVersion returns version if git succeeds', () async {
+    testUsingContext('fetchLatestRevision returns revision if git succeeds', () async {
       const String revision = 'abc123';
-      const String version = '1.2.3';
 
       processManager.addCommands(<FakeCommand>[
         const FakeCommand(command: <String>[
@@ -163,26 +155,18 @@ void main() {
           'git', 'rev-parse', '--verify', '@{upstream}',
         ],
         stdout: revision),
-        const FakeCommand(command: <String>[
-          'git', 'tag', '--points-at', revision,
-        ]),
-        const FakeCommand(command: <String>[
-          'git', 'describe', '--match', '*.*.*', '--long', '--tags', revision,
-        ],
-        stdout: version),
       ]);
 
-      final FlutterVersion updateVersion = await realCommandRunner.fetchLatestVersion(localVersion: FakeFlutterVersion());
+      final String updateRevision = await realCommandRunner.fetchLatestRevision();
 
-      expect(updateVersion.frameworkVersion, version);
-      expect(updateVersion.frameworkRevision, revision);
+      expect(updateRevision, revision);
       expect(processManager, hasNoRemainingExpectations);
     }, overrides: <Type, Generator>{
       ProcessManager: () => processManager,
       Platform: () => fakePlatform,
     });
 
-    testUsingContext('fetchLatestVersion throws toolExit if HEAD is detached', () async {
+    testUsingContext('fetchLatestRevision throws toolExit if HEAD is detached', () async {
       processManager.addCommands(const <FakeCommand>[
         FakeCommand(command: <String>[
           'git', 'fetch', '--tags',
@@ -198,7 +182,7 @@ void main() {
       ]);
 
       await expectLater(
-        () async => realCommandRunner.fetchLatestVersion(localVersion: FakeFlutterVersion()),
+        () async => realCommandRunner.fetchLatestRevision(),
         throwsToolExit(message: 'Unable to upgrade Flutter: Your Flutter checkout '
           'is currently not on a release branch.\n'
           'Use "flutter channel" to switch to an official channel, and retry. '
@@ -211,7 +195,7 @@ void main() {
       Platform: () => fakePlatform,
     });
 
-    testUsingContext('fetchLatestVersion throws toolExit if no upstream configured', () async {
+    testUsingContext('fetchLatestRevision throws toolExit if no upstream configured', () async {
       processManager.addCommands(const <FakeCommand>[
         FakeCommand(command: <String>[
           'git', 'fetch', '--tags',
@@ -227,7 +211,7 @@ void main() {
       ]);
 
       await expectLater(
-        () async => realCommandRunner.fetchLatestVersion(localVersion: FakeFlutterVersion()),
+        () async => realCommandRunner.fetchLatestRevision(),
         throwsToolExit(message: 'Unable to upgrade Flutter: The current Flutter '
           'branch/channel is not tracking any remote repository.\n'
           'Re-install Flutter by going to https://flutter.dev/docs/get-started/install.'
@@ -470,10 +454,14 @@ class FakeUpgradeCommandRunner extends UpgradeCommandRunner {
   bool willHaveUncommittedChanges = false;
   bool alreadyUpToDate = false;
 
+  String remoteRevision = '';
   FlutterVersion remoteVersion;
 
   @override
-  Future<FlutterVersion> fetchLatestVersion({FlutterVersion localVersion}) async => remoteVersion;
+  FlutterVersion getLatestVersion(String revision) => remoteVersion;
+
+  @override
+  Future<String> fetchLatestRevision() async => remoteRevision;
 
   @override
   Future<bool> hasUncommittedChanges() async => willHaveUncommittedChanges;

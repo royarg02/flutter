@@ -118,20 +118,21 @@ class UpgradeCommandRunner {
     required bool testFlow,
     required bool verifyOnly,
   }) async {
-    final FlutterVersion upstreamVersion = await fetchLatestVersion(localVersion: flutterVersion);
-    if (flutterVersion.frameworkRevision == upstreamVersion.frameworkRevision) {
+    final String upstreamRevision = await fetchLatestRevision();
+    // At this point the current checkout should be on HEAD of a branch having
+    // an upstream. Check whether this upstream is "standard".
+    final VersionCheckError? error = VersionUpstreamValidator(version: flutterVersion, platform: globals.platform).run();
+    if (error != null) {
+      throwToolExit(
+        'Unable to upgrade Flutter: ${error.message}\n'
+        'Reinstalling Flutter may fix this issue. Visit $_flutterInstallDocs '
+        'for instructions.'
+      );
+    }
+    if (flutterVersion.frameworkRevision == upstreamRevision) {
+      // If the revision at upstream is same as local, we are up to date.
       globals.printStatus('Flutter is already up to date on channel ${flutterVersion.channel}');
       globals.printStatus('$flutterVersion');
-      return;
-    } else if (verifyOnly) {
-      globals.printStatus('A new version of Flutter is available on channel ${flutterVersion.channel}\n');
-      globals.printStatus('The latest version: ${upstreamVersion.frameworkVersion} (revision ${upstreamVersion.frameworkRevisionShort})', emphasis: true);
-      globals.printStatus('Your current version: ${flutterVersion.frameworkVersion} (revision ${flutterVersion.frameworkRevisionShort})\n');
-      globals.printStatus('To upgrade now, run "flutter upgrade".');
-      if (flutterVersion.channel == 'stable') {
-        globals.printStatus('\nSee the announcement and release notes:');
-        globals.printStatus('https://flutter.dev/docs/development/tools/sdk/release-notes');
-      }
       return;
     }
     if (!force && gitTagVersion == const GitTagVersion.unknown()) {
@@ -163,13 +164,34 @@ class UpgradeCommandRunner {
         'command with "--force".'
       );
     }
+    // At this point there should be a newer version available with no issues at the local install.
+    // Construct a [FlutterVersion] representing the new version.
+    final FlutterVersion upstreamVersion = getLatestVersion(upstreamRevision);
+    if (verifyOnly) {
+      globals.printStatus('A new version of Flutter is available on channel ${flutterVersion.channel}\n');
+      globals.printStatus('The latest version: ${upstreamVersion.frameworkVersion} (revision ${upstreamVersion.frameworkRevisionShort})', emphasis: true);
+      globals.printStatus('Your current version: ${flutterVersion.frameworkVersion} (revision ${flutterVersion.frameworkRevisionShort})\n');
+      globals.printStatus('To upgrade now, run "flutter upgrade".');
+      if (flutterVersion.channel == 'stable') {
+        globals.printStatus('\nSee the announcement and release notes:');
+        globals.printStatus('https://flutter.dev/docs/development/tools/sdk/release-notes');
+      }
+      return;
+    }
     recordState(flutterVersion);
     await ChannelCommand.upgradeChannel(flutterVersion);
     globals.printStatus('Upgrading Flutter to ${upstreamVersion.frameworkVersion} from ${flutterVersion.frameworkVersion} in $workingDirectory...');
-    await attemptReset(upstreamVersion.frameworkRevision);
+    await attemptReset(upstreamRevision);
     if (!testFlow) {
       await flutterUpgradeContinue();
     }
+  }
+
+  FlutterVersion getLatestVersion(String revision) {
+    return FlutterVersion(
+      workingDirectory: workingDirectory,
+      frameworkRevision: revision,
+    );
   }
 
   void recordState(FlutterVersion flutterVersion) {
@@ -229,12 +251,10 @@ class UpgradeCommandRunner {
     }
   }
 
-  /// Returns the remote HEAD flutter version.
+  /// Returns the revision at the HEAD of the current tracking remote branch.
   ///
   /// Exits tool if HEAD isn't pointing to a branch, or there is no upstream.
-  Future<FlutterVersion> fetchLatestVersion({
-    required FlutterVersion localVersion,
-  }) async {
+  Future<String> fetchLatestRevision() async {
     String revision;
     try {
       // Fetch upstream branch's commits and tags
@@ -269,18 +289,7 @@ class UpgradeCommandRunner {
         throwToolExit(errorString);
       }
     }
-    // At this point the current checkout should be on HEAD of a branch having
-    // an upstream. Check whether this upstream is "standard".
-    final VersionCheckError? error = VersionUpstreamValidator(version: localVersion, platform: globals.platform).run();
-    if (error != null) {
-      throwToolExit(
-        'Unable to upgrade Flutter: '
-        '${error.message}\n'
-        'Reinstalling Flutter may fix this issue. Visit $_flutterInstallDocs '
-        'for instructions.'
-      );
-    }
-    return FlutterVersion(workingDirectory: workingDirectory, frameworkRevision: revision);
+    return revision;
   }
 
   /// Attempts a hard reset to the given revision.
