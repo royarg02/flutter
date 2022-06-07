@@ -862,6 +862,7 @@ class VersionFreshnessValidator {
       await stamp.store(
         newTimeVersionWasChecked: now,
         newKnownRemoteVersion: remoteFrameworkCommitDate,
+        cache: cache,
       );
       // If the ping was successful construct a [FlutterVersion] representing
       // the remote version.
@@ -871,11 +872,12 @@ class VersionFreshnessValidator {
       // This happens when any of the git commands fails, which can happen when
       // there's no Internet connectivity. Remote version check is best effort
       // only. We do not prevent the command from running when it fails.
-      globals.printTrace('Failed to check Flutter version in the remote repository: $error');
+      logger.printTrace('Failed to check Flutter version in the remote repository: $error');
       // Still update the timestamp to avoid us hitting the server on every single
       // command if for some reason we cannot connect (eg. we may be offline).
       await stamp.store(
         newTimeVersionWasChecked: now,
+        cache: cache,
       );
       return null;
     }
@@ -911,14 +913,21 @@ class VersionFreshnessValidator {
     }
   }
 
+  @visibleForTesting
+  DateTime? getLocalFrameworkCommitDate() {
+    try {
+      return DateTime.parse(_gitCommitDate());
+    } on VersionCheckError {
+      // The tool failed to parse the local commit date.
+      return null;
+    }
+  }
+
   /// Execute validations and print warning to [logger] if necessary.
   Future<void> run() async {
-    final DateTime localFrameworkCommitDate;
-    try {
-      localFrameworkCommitDate = DateTime.parse(_gitCommitDate());
-    } on VersionCheckError {
-      // The tool failed to parse the local commit date. Bail from the freshness
-      // check to prevent crash.
+    final DateTime? localFrameworkCommitDate = getLocalFrameworkCommitDate();
+    if (localFrameworkCommitDate == null) {
+      // Bail from the freshness check to prevent crash.
       return;
     }
 

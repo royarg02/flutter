@@ -712,24 +712,15 @@ class FakeFlutterVersion extends Fake implements FlutterVersion {
   final String? repositoryUrl;
 }
 
-class FakeVersionFreshnessValidator extends Fake implements VersionFreshnessValidator {
+class FakeVersionFreshnessValidator extends VersionFreshnessValidator {
   FakeVersionFreshnessValidator({
-    this.version,
-    this.clock,
-    this.cache,
-    this.logger,
+    FlutterVersion version,
+    SystemClock clock,
+    Cache cache,
+    Logger logger,
     this.localFrameworkCommitDate,
     this.latestFlutterCommitDate,
-  });
-
-  @override
-  final FlutterVersion version;
-  @override
-  final SystemClock clock;
-  @override
-  final Cache cache;
-  @override
-  final Logger logger;
+  }) : super(version: version, clock: clock, cache: cache, logger: logger);
 
   final DateTime localFrameworkCommitDate;
   final DateTime latestFlutterCommitDate;
@@ -737,8 +728,16 @@ class FakeVersionFreshnessValidator extends Fake implements VersionFreshnessVali
   bool didPingServer = false;
 
   @override
-  Future<String> fetchRemoteFrameworkCommitDate() {
+  Future<String> fetchRemoteFrameworkCommitDate() async {
     didPingServer = true;
-    return latestFlutterCommitDate.to
+    if (latestFlutterCommitDate == null) {
+      throw VersionCheckError('Failed to ping upstream');
+    }
+    return latestFlutterCommitDate.toString();
+  }
+
+  @override
+  DateTime getLocalFrameworkCommitDate() {
+    return localFrameworkCommitDate;
   }
 }
